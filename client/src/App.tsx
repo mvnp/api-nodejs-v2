@@ -9,7 +9,11 @@ import NotFound from "@/pages/not-found";
 function Router() {
   return (
     <Switch>
-      <Route path="/" component={ApiDocs} />
+      <Route path="/" component={() => {
+        window.location.href = '/api-docs';
+        return null;
+      }} />
+      <Route path="/api-docs" component={ApiDocs} />
       <Route component={NotFound} />
     </Switch>
   );

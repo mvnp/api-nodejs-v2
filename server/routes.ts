@@ -1,19 +1,125 @@
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertUserSchema, loginUserSchema, updateUserSchema } from "@shared/schema";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
+import swaggerJsdoc from "swagger-jsdoc";
+import swaggerUi from "swagger-ui-express";
 
 const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key";
 const JWT_EXPIRES_IN = "1h";
 
-interface AuthRequest extends Express.Request {
+interface AuthRequest extends Request {
   user?: { id: number; email: string };
 }
 
+// Swagger configuration
+const swaggerOptions = {
+  definition: {
+    openapi: "3.0.0",
+    info: {
+      title: "Node.js JWT Authentication API",
+      version: "1.0.0",
+      description: "A comprehensive REST API with JWT authentication for user management",
+      contact: {
+        name: "API Support",
+        email: "support@example.com"
+      }
+    },
+    servers: [
+      {
+        url: "http://localhost:5000",
+        description: "Development server"
+      }
+    ],
+    components: {
+      securitySchemes: {
+        BearerAuth: {
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "JWT",
+          description: "Enter JWT token in format: Bearer <token>"
+        }
+      },
+      schemas: {
+        User: {
+          type: "object",
+          properties: {
+            id: { type: "integer", example: 1 },
+            name: { type: "string", example: "John Doe" },
+            email: { type: "string", format: "email", example: "john@example.com" },
+            emailVerifiedAt: { type: "string", format: "date-time", nullable: true },
+            createdAt: { type: "string", format: "date-time" },
+            updatedAt: { type: "string", format: "date-time" }
+          }
+        },
+        RegisterRequest: {
+          type: "object",
+          required: ["name", "email", "password", "password_confirmation"],
+          properties: {
+            name: { type: "string", example: "John Doe" },
+            email: { type: "string", format: "email", example: "john@example.com" },
+            password: { type: "string", minLength: 8, example: "password123" },
+            password_confirmation: { type: "string", minLength: 8, example: "password123" }
+          }
+        },
+        LoginRequest: {
+          type: "object",
+          required: ["email", "password"],
+          properties: {
+            email: { type: "string", format: "email", example: "john@example.com" },
+            password: { type: "string", example: "password123" }
+          }
+        },
+        UpdateProfileRequest: {
+          type: "object",
+          properties: {
+            name: { type: "string", example: "John Updated" },
+            email: { type: "string", format: "email", example: "john.updated@example.com" }
+          }
+        },
+        AuthResponse: {
+          type: "object",
+          properties: {
+            success: { type: "boolean", example: true },
+            message: { type: "string", example: "Login successful" },
+            data: {
+              type: "object",
+              properties: {
+                user: { $ref: "#/components/schemas/User" },
+                token: { type: "string", example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." },
+                token_type: { type: "string", example: "bearer" },
+                expires_in: { type: "integer", example: 3600 }
+              }
+            }
+          }
+        },
+        ErrorResponse: {
+          type: "object",
+          properties: {
+            success: { type: "boolean", example: false },
+            message: { type: "string", example: "Validation failed" },
+            errors: {
+              type: "object",
+              additionalProperties: {
+                type: "array",
+                items: { type: "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    security: []
+  },
+  apis: ["./server/routes.ts"]
+};
+
+const swaggerSpec = swaggerJsdoc(swaggerOptions);
+
 // JWT middleware
-const authenticateToken = async (req: AuthRequest, res: Express.Response, next: Express.NextFunction) => {
+const authenticateToken = async (req: AuthRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
   const token = authHeader && authHeader.split(' ')[1];
 
@@ -46,114 +152,45 @@ const authenticateToken = async (req: AuthRequest, res: Express.Response, next: 
 };
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Swagger/OpenAPI documentation endpoint
-  app.get("/api/docs", (req, res) => {
-    const swaggerDoc = {
-      openapi: "3.0.0",
-      info: {
-        title: "Laravel-style JWT Authentication API",
-        version: "1.0.0",
-        description: "RESTful API with JWT token-based authentication system for secure user management and protected routes."
-      },
-      servers: [
-        {
-          url: "https://api.example.com",
-          description: "Production server"
-        }
-      ],
-      components: {
-        securitySchemes: {
-          bearerAuth: {
-            type: "http",
-            scheme: "bearer",
-            bearerFormat: "JWT"
-          }
-        }
-      },
-      paths: {
-        "/api/register": {
-          post: {
-            summary: "Register a new user",
-            tags: ["Authentication"],
-            requestBody: {
-              required: true,
-              content: {
-                "application/json": {
-                  schema: {
-                    type: "object",
-                    properties: {
-                      name: { type: "string" },
-                      email: { type: "string", format: "email" },
-                      password: { type: "string", minLength: 8 },
-                      password_confirmation: { type: "string", minLength: 8 }
-                    },
-                    required: ["name", "email", "password", "password_confirmation"]
-                  }
-                }
-              }
-            },
-            responses: {
-              201: {
-                description: "User registered successfully"
-              },
-              422: {
-                description: "Validation error"
-              }
-            }
-          }
-        },
-        "/api/login": {
-          post: {
-            summary: "Authenticate user",
-            tags: ["Authentication"],
-            requestBody: {
-              required: true,
-              content: {
-                "application/json": {
-                  schema: {
-                    type: "object",
-                    properties: {
-                      email: { type: "string", format: "email" },
-                      password: { type: "string" }
-                    },
-                    required: ["email", "password"]
-                  }
-                }
-              }
-            },
-            responses: {
-              200: {
-                description: "Login successful"
-              },
-              401: {
-                description: "Invalid credentials"
-              }
-            }
-          }
-        },
-        "/api/user/profile": {
-          get: {
-            summary: "Get user profile",
-            tags: ["User Management"],
-            security: [{ bearerAuth: [] }],
-            responses: {
-              200: {
-                description: "Profile retrieved successfully"
-              },
-              401: {
-                description: "Unauthorized"
-              }
-            }
-          }
-        }
-      }
-    };
-    
-    res.json(swaggerDoc);
+  // Swagger UI
+  app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+    customCss: '.swagger-ui .topbar { display: none }',
+    customSiteTitle: "Node.js JWT API Documentation"
+  }));
+
+  // Swagger JSON endpoint
+  app.get("/api/swagger.json", (req: Request, res: Response) => {
+    res.setHeader("Content-Type", "application/json");
+    res.send(swaggerSpec);
   });
 
-  // Auth routes
-  app.post("/api/register", async (req, res) => {
+  /**
+   * @swagger
+   * /api/register:
+   *   post:
+   *     summary: Register a new user
+   *     tags: [Authentication]
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             $ref: '#/components/schemas/RegisterRequest'
+   *     responses:
+   *       201:
+   *         description: User registered successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/AuthResponse'
+   *       422:
+   *         description: Validation error
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ErrorResponse'
+   */
+  app.post("/api/register", async (req: Request, res: Response) => {
     try {
       const validatedData = insertUserSchema.parse(req.body);
       
@@ -213,7 +250,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/login", async (req, res) => {
+  /**
+   * @swagger
+   * /api/login:
+   *   post:
+   *     summary: Authenticate user
+   *     tags: [Authentication]
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             $ref: '#/components/schemas/LoginRequest'
+   *     responses:
+   *       200:
+   *         description: Login successful
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/AuthResponse'
+   *       401:
+   *         description: Invalid credentials
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ErrorResponse'
+   */
+  app.post("/api/login", async (req: Request, res: Response) => {
     try {
       const validatedData = loginUserSchema.parse(req.body);
       
@@ -284,7 +347,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/refresh", authenticateToken, async (req: AuthRequest, res) => {
+  /**
+   * @swagger
+   * /api/refresh:
+   *   post:
+   *     summary: Refresh JWT token
+   *     tags: [Authentication]
+   *     security:
+   *       - BearerAuth: []
+   *     responses:
+   *       200:
+   *         description: Token refreshed successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 message:
+   *                   type: string
+   *                   example: "Token refreshed successfully"
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     token:
+   *                       type: string
+   *                       example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+   *                     token_type:
+   *                       type: string
+   *                       example: "bearer"
+   *                     expires_in:
+   *                       type: integer
+   *                       example: 3600
+   *       401:
+   *         description: Unauthorized
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ErrorResponse'
+   */
+  app.post("/api/refresh", authenticateToken, async (req: AuthRequest, res: Response) => {
     try {
       if (!req.user) {
         return res.status(401).json({
@@ -317,17 +421,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/logout", authenticateToken, (req, res) => {
-    // In a real application, you might want to invalidate the token
-    // For now, we'll just return a success message
+  /**
+   * @swagger
+   * /api/logout:
+   *   post:
+   *     summary: Logout user
+   *     tags: [Authentication]
+   *     security:
+   *       - BearerAuth: []
+   *     responses:
+   *       200:
+   *         description: Successfully logged out
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 message:
+   *                   type: string
+   *                   example: "Successfully logged out"
+   *       401:
+   *         description: Unauthorized
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ErrorResponse'
+   */
+  app.post("/api/logout", authenticateToken, (req: Request, res: Response) => {
     res.json({
       success: true,
       message: "Successfully logged out"
     });
   });
 
-  // Protected routes
-  app.get("/api/user/profile", authenticateToken, async (req: AuthRequest, res) => {
+  /**
+   * @swagger
+   * /api/user/profile:
+   *   get:
+   *     summary: Get user profile
+   *     tags: [User Management]
+   *     security:
+   *       - BearerAuth: []
+   *     responses:
+   *       200:
+   *         description: Profile retrieved successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     user:
+   *                       $ref: '#/components/schemas/User'
+   *       401:
+   *         description: Unauthorized
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ErrorResponse'
+   */
+  app.get("/api/user/profile", authenticateToken, async (req: AuthRequest, res: Response) => {
     try {
       if (!req.user) {
         return res.status(401).json({
@@ -361,7 +522,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/user/profile", authenticateToken, async (req: AuthRequest, res) => {
+  /**
+   * @swagger
+   * /api/user/profile:
+   *   put:
+   *     summary: Update user profile
+   *     tags: [User Management]
+   *     security:
+   *       - BearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             $ref: '#/components/schemas/UpdateProfileRequest'
+   *     responses:
+   *       200:
+   *         description: Profile updated successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 message:
+   *                   type: string
+   *                   example: "Profile updated successfully"
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     user:
+   *                       $ref: '#/components/schemas/User'
+   *       401:
+   *         description: Unauthorized
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ErrorResponse'
+   *       422:
+   *         description: Validation error
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ErrorResponse'
+   */
+  app.put("/api/user/profile", authenticateToken, async (req: AuthRequest, res: Response) => {
     try {
       if (!req.user) {
         return res.status(401).json({
@@ -425,7 +632,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/users", authenticateToken, async (req: AuthRequest, res) => {
+  /**
+   * @swagger
+   * /api/users:
+   *   get:
+   *     summary: Get all users
+   *     tags: [User Management]
+   *     security:
+   *       - BearerAuth: []
+   *     responses:
+   *       200:
+   *         description: Users retrieved successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     users:
+   *                       type: array
+   *                       items:
+   *                         $ref: '#/components/schemas/User'
+   *       401:
+   *         description: Unauthorized
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ErrorResponse'
+   */
+  app.get("/api/users", authenticateToken, async (req: AuthRequest, res: Response) => {
     try {
       const users = await storage.getAllUsers();
       
