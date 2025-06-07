@@ -1,5 +1,7 @@
 import { users, type User, type InsertUser, type UpdateUser, type PublicUser } from "@shared/schema";
 import bcrypt from "bcryptjs";
+import { db } from "./db";
+import { eq } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: number): Promise<User | undefined>;
@@ -10,41 +12,28 @@ export interface IStorage {
   verifyPassword(plainPassword: string, hashedPassword: string): Promise<boolean>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<number, User>;
-  private currentId: number;
-
-  constructor() {
-    this.users = new Map();
-    this.currentId = 1;
-  }
-
+export class DatabaseStorage implements IStorage {
   async getUser(id: number): Promise<User | undefined> {
-    return this.users.get(id);
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user || undefined;
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.email === email,
-    );
+    const [user] = await db.select().from(users).where(eq(users.email, email));
+    return user || undefined;
   }
 
   async createUser(insertUser: Omit<InsertUser, 'password_confirmation'>): Promise<PublicUser> {
     const hashedPassword = await bcrypt.hash(insertUser.password, 12);
-    const id = this.currentId++;
-    const now = new Date();
     
-    const user: User = {
-      id,
-      name: insertUser.name,
-      email: insertUser.email,
-      password: hashedPassword,
-      emailVerifiedAt: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    
-    this.users.set(id, user);
+    const [user] = await db
+      .insert(users)
+      .values({
+        name: insertUser.name,
+        email: insertUser.email,
+        password: hashedPassword,
+      })
+      .returning();
     
     // Return user without password
     const { password, ...publicUser } = user;
@@ -52,24 +41,25 @@ export class MemStorage implements IStorage {
   }
 
   async updateUser(id: number, updates: UpdateUser): Promise<PublicUser | undefined> {
-    const user = this.users.get(id);
+    const [user] = await db
+      .update(users)
+      .set({
+        ...updates,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, id))
+      .returning();
+    
     if (!user) return undefined;
-
-    const updatedUser: User = {
-      ...user,
-      ...updates,
-      updatedAt: new Date(),
-    };
-
-    this.users.set(id, updatedUser);
     
     // Return user without password
-    const { password, ...publicUser } = updatedUser;
+    const { password, ...publicUser } = user;
     return publicUser;
   }
 
   async getAllUsers(): Promise<PublicUser[]> {
-    return Array.from(this.users.values()).map(({ password, ...user }) => user);
+    const allUsers = await db.select().from(users);
+    return allUsers.map(({ password, ...user }) => user);
   }
 
   async verifyPassword(plainPassword: string, hashedPassword: string): Promise<boolean> {
@@ -77,4 +67,4 @@ export class MemStorage implements IStorage {
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
